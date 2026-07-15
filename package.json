@@ -1,0 +1,10 @@
+{
+  "name": "medication-record",
+  "private": true,
+  "scripts": {
+    "build:web": "cd app && npm run build:web && rm -rf ../server/public && cp -r dist ../server/public",
+    "dev": "cd server && npm run dev",
+    "typecheck": "cd server && npm run typecheck && cd ../app && npm run typecheck",
+    "test": "cd server && npm test"
+  }
+}

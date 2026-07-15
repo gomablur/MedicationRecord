@@ -1,0 +1,29 @@
+{
+  "name": "okusuri-server",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node scripts/predev.mjs && wrangler dev",
+    "deploy": "wrangler deploy",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate:local": "wrangler d1 migrations apply okusuri-db --local",
+    "db:migrate:remote": "wrangler d1 migrations apply okusuri-db --remote",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@hono/oauth-providers": "^0.8.2",
+    "@hono/zod-validator": "^0.8.0",
+    "drizzle-orm": "^0.45.2",
+    "hono": "^4.7.0",
+    "uuidv7": "^1.0.2",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20260710.1",
+    "drizzle-kit": "^0.31.10",
+    "typescript": "^5.7.0",
+    "vitest": "^4.1.9",
+    "wrangler": "^4.0.0"
+  }
+}

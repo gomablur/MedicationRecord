@@ -1,0 +1,7 @@
+# ローカル開発用の環境変数 (.dev.vars にコピーされる。.dev.vars は gitignore 済み)
+# DEV_AUTH=true で /api/auth/dev による Google なしログインが有効になる
+DEV_AUTH=true
+JWT_SECRET=local-dev-secret-change-in-production
+# Google OAuth をローカルで試す場合のみ設定
+# GOOGLE_CLIENT_ID=
+# GOOGLE_CLIENT_SECRET=

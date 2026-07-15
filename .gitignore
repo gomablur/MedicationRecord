@@ -1,0 +1,20 @@
+# 依存
+node_modules/
+
+# Wrangler
+server/.wrangler/
+server/.dev.vars
+
+# Expo web export のコピー先 (GH Actions / ローカルビルドで生成)
+server/public/
+
+# Expo
+app/.expo/
+app/dist/
+app/ios/
+app/android/
+app/expo-env.d.ts
+
+# その他
+*.log
+.DS_Store

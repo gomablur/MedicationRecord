@@ -1,0 +1,91 @@
+# main への push で Worker を本番デプロイする。
+#   検証 (テスト・型チェック) → Expo web export → D1 マイグレーション適用 → wrangler deploy
+# つまり push = 本番反映。マイグレーションを含む変更は特にローカルで検証してから push すること。
+#
+# 前提: リポジトリの Secrets に以下を登録しておく
+#   CLOUDFLARE_API_TOKEN  … Workers・D1 の編集権限を持つ API トークン
+#   CLOUDFLARE_ACCOUNT_ID … Cloudflare ダッシュボードのアカウント ID
+#
+# ネイティブ (iOS/Android) のビルドはこのワークフローでは行わない (Mac 側で実施)。
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: |
+            server/package-lock.json
+            app/package-lock.json
+
+      - name: サーバー: テスト・型チェック
+        working-directory: server
+        run: |
+          npm ci
+          npm test
+          npm run typecheck
+
+      - name: アプリ: 型チェック・Web ビルド検証
+        working-directory: app
+        run: |
+          npm ci
+          npm run typecheck
+          npm run build:web
+
+  deploy:
+    # main への push 時のみデプロイ。PR はビルド検証まで
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: check
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: ${{ steps.deploy.outputs.deployment-url }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: |
+            server/package-lock.json
+            app/package-lock.json
+
+      - name: Expo web export → server/public
+        run: |
+          (cd app && npm ci && npm run build:web)
+          rm -rf server/public
+          cp -r app/dist server/public
+
+      - name: サーバー依存のインストール
+        working-directory: server
+        run: npm ci
+
+      - name: D1 マイグレーション適用
+        uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: server
+          command: d1 migrations apply okusuri-db --remote
+
+      - name: Worker デプロイ
+        id: deploy
+        uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: server
+          command: deploy
