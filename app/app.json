@@ -1,0 +1,38 @@
+{
+  "expo": {
+    "name": "お薬手帳",
+    "slug": "okusuri",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/images/icon.png",
+    "scheme": "okusuri",
+    "userInterfaceStyle": "automatic",
+    "ios": {
+      "bundleIdentifier": "com.goma-b.okusuri",
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSCameraUsageDescription": "お薬手帳のQRコードを読み取るためにカメラを使用します。"
+      }
+    },
+    "android": {
+      "package": "com.goma_b.okusuri"
+    },
+    "web": {
+      "output": "single",
+      "favicon": "./assets/images/favicon.png"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-secure-store",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "お薬手帳のQRコードを読み取るためにカメラを使用します。"
+        }
+      ]
+    ],
+    "experiments": {
+      "typedRoutes": true
+    }
+  }
+}

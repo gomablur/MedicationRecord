@@ -6,6 +6,7 @@ const now = sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`;
 export const users = sqliteTable("users", {
   id: text("id").primaryKey(),
   googleSub: text("google_sub").unique(),
+  appleSub: text("apple_sub").unique(),
   email: text("email").notNull().unique(),
   name: text("name").notNull(),
   avatarUrl: text("avatar_url"),

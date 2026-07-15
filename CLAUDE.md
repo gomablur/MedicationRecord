@@ -11,7 +11,8 @@
 ## 構成の要点
 
 - `server/` — 1 Worker 構成: Hono API (`/api/*`) + Workers Static Assets (Expo web export)。
-  未ログインには SPA を配信しない (`run_worker_first` + ログインページ)
+  SPA は未ログインでも配信してよい (ユーザー方針。ログイン画面は Expo 共通の login.tsx)。
+  データ API は全て authMiddleware で保護
 - `app/` — Expo 57 / expo-router。Web は同一オリジンでクッキー認証、
   ネイティブは Bearer トークン (SecureStore) + `okusuri://auth#token=` コールバック
 - DB: D1 + Drizzle。スキーマの正は `server/src/db/schema.ts` (migrations/ はそこから生成)
@@ -34,7 +35,9 @@
 
 - `okusuri.goma-b.com` (カスタムドメイン)。`workers_dev: false` / `preview_urls: false` は**維持すること**(ユーザー方針)
 - main への push = 本番デプロイ (GH Actions がマイグレーション適用まで行う)
-- シークレット: GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET / JWT_SECRET (wrangler secret)
+- シークレット: GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET / JWT_SECRET (wrangler secret)。
+  任意で APPLE_TEAM_ID / APPLE_CLIENT_ID / APPLE_KEY_ID / APPLE_PRIVATE_KEY (Apple ログイン。
+  未設定なら自動で無効、ボタンも出ない)。ログインボタンの出し分けは `/api/auth/providers`
 - ネイティブビルドはユーザーが Mac 側で実施 (コンテナからは不可)
 
 ## 作業ルール

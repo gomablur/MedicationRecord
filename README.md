@@ -8,7 +8,8 @@ iOS / Android / Web のどこからでも同じデータを参照できる。
 - **薬の記録・確認**: 調剤ごとの記録 (調剤日・薬局・処方元・薬の一覧) を作成・閲覧・検索・編集
 - **QR 取り込み**: 薬局の明細等に印字される JAHIS 電子版お薬手帳 QR コードを読み取って自動登録
   (分割 QR 対応。フォーマットは [docs/jahis-qr-format.md](docs/jahis-qr-format.md))
-- **Google アカウントでログイン (OAuth2)**: どの端末からログインしても同じ記録を参照できる
+- **Google / Apple アカウントでログイン (OAuth2)**: 誰でも登録でき、記録はユーザーごとに分離。
+  どの端末からログインしても同じ記録を参照できる (Apple はシークレット設定時のみ有効)
 
 将来対応 (拡張ポイントとして設計のみ): マイナポータル連携、OS ヘルスアプリ連携
 ([docs/ROADMAP.md](docs/ROADMAP.md) 参照)。
@@ -22,7 +23,8 @@ docs/    ドキュメント
 ```
 
 - 認証: Google OAuth2。Web は HttpOnly クッキー、ネイティブは Bearer トークン (SecureStore 保存)
-- 未ログインのブラウザには SPA を配信せず、自己完結のログインページのみ返す
+- ログイン画面は Expo 共通 (Web もアプリ内の login 画面)。SPA は未ログインでも配信するが、
+  データ API (`/api/*`) はすべて認証必須
 - 本番: `okusuri.goma-b.com` (Worker のカスタムドメイン。workers.dev は無効化)
 
 ## 開発 (DevContainer 内で完結するもの)
@@ -64,6 +66,17 @@ curl -c /tmp/jar -L http://localhost:8787/api/auth/dev   # 以降 -b /tmp/jar
    npx wrangler secret put GOOGLE_CLIENT_ID
    npx wrangler secret put GOOGLE_CLIENT_SECRET
    npx wrangler secret put JWT_SECRET        # 例: openssl rand -base64 32
+   ```
+5. **(任意) Sign in with Apple** — 未設定なら Apple ボタンは表示されない:
+   - Apple Developer で App ID + **Services ID** (例: `com.goma-b.okusuri.web`) を作成し、
+     Sign in with Apple を有効化。Return URL: `https://okusuri.goma-b.com/api/auth/apple/callback`、
+     ドメイン: `okusuri.goma-b.com`
+   - 「Sign in with Apple 用キー」(.p8) を作成し、以下を登録:
+   ```bash
+   npx wrangler secret put APPLE_TEAM_ID      # 開発者アカウントの Team ID
+   npx wrangler secret put APPLE_CLIENT_ID    # Services ID
+   npx wrangler secret put APPLE_KEY_ID       # キーの Key ID
+   npx wrangler secret put APPLE_PRIVATE_KEY  # .p8 ファイルの中身をそのまま貼り付け
    ```
 5. **GitHub Actions の Secrets** (リポジトリ設定 → Environments `production` 推奨):
    - `CLOUDFLARE_API_TOKEN` (Workers + D1 編集権限)

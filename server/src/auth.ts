@@ -1,4 +1,7 @@
-// 認証まわり一式: Google OAuth・開発用ログイン・セッション・認可ミドルウェア。
+// 認証まわり一式: Google / Apple OAuth・開発用ログイン・セッション・認可ミドルウェア。
+//
+// 登録は誰でも可能 (許可リストなし)。データは各 API が userId でスコープするため
+// 他人の記録は見えない。
 //
 // セッションは 2 形態をサポートする:
 //   - Web:       JWT を HttpOnly クッキーに保存 (SPA は同一オリジンなので自動送信)
@@ -14,37 +17,67 @@ import { drizzle } from "drizzle-orm/d1";
 import { eq } from "drizzle-orm";
 import { uuidv7 } from "uuidv7";
 import { users } from "./db/schema";
-import type { AppEnv, AuthUser } from "./env";
+import {
+  buildAppleAuthUrl,
+  exchangeAppleCode,
+  parseAppleUserField,
+  type AppleConfig,
+} from "./apple";
+import type { AppEnv, Bindings, AuthUser } from "./env";
 
 const COOKIE_NAME = "session";
 // ネイティブフロー識別用の短命クッキー (Google 往復の間だけ保持)
 const NATIVE_FLOW_COOKIE = "auth_native";
 const SESSION_DAYS = 30;
 
-/** ログイン成功時の共通処理: users を upsert して JWT を発行する */
+type LoginProfile = {
+  provider: "google" | "apple";
+  sub: string;
+  /** Apple は 2 回目以降 email が取れないことがあるため省略可 */
+  email?: string;
+  name?: string;
+  avatarUrl?: string | null;
+};
+
+/**
+ * ログイン成功時の共通処理: users を upsert して JWT を発行する。
+ * 照合はプロバイダの sub を優先し、なければメールで既存アカウントに紐づける
+ * (同じメールなら Google / Apple どちらでログインしても同一ユーザー)。
+ */
 async function loginWithProfile(
   db: ReturnType<typeof drizzle>,
   env: { JWT_SECRET: string },
-  profile: { sub?: string; email: string; name: string; avatarUrl?: string | null },
+  profile: LoginProfile,
 ): Promise<string> {
-  const email = profile.email.toLowerCase();
+  const email = profile.email?.toLowerCase();
+  const subColumn = profile.provider === "google" ? users.googleSub : users.appleSub;
 
-  let user = await db.select().from(users).where(eq(users.email, email)).get();
+  let user = await db.select().from(users).where(eq(subColumn, profile.sub)).get();
+  if (!user && email) {
+    user = await db.select().from(users).where(eq(users.email, email)).get();
+  }
+
   if (!user) {
+    if (!email) throw new Error("初回ログインにはメールアドレスの提供が必要です");
     const id = uuidv7();
     await db.insert(users).values({
       id,
-      googleSub: profile.sub ?? null,
+      googleSub: profile.provider === "google" ? profile.sub : null,
+      appleSub: profile.provider === "apple" ? profile.sub : null,
       email,
-      name: profile.name,
+      name: profile.name || email,
       avatarUrl: profile.avatarUrl ?? null,
     });
     user = await db.select().from(users).where(eq(users.id, id)).get();
-  } else if (profile.sub && !user.googleSub) {
-    await db
-      .update(users)
-      .set({ googleSub: profile.sub, avatarUrl: profile.avatarUrl ?? user.avatarUrl })
-      .where(eq(users.id, user.id));
+  } else {
+    // 未紐づけのプロバイダ sub やアイコンを補完する
+    const patch: Partial<typeof users.$inferInsert> = {};
+    if (profile.provider === "google" && !user.googleSub) patch.googleSub = profile.sub;
+    if (profile.provider === "apple" && !user.appleSub) patch.appleSub = profile.sub;
+    if (profile.avatarUrl && !user.avatarUrl) patch.avatarUrl = profile.avatarUrl;
+    if (Object.keys(patch).length > 0) {
+      await db.update(users).set(patch).where(eq(users.id, user.id));
+    }
   }
   if (!user) throw new Error("ユーザーの作成に失敗しました");
 
@@ -66,7 +99,17 @@ function setSessionCookie(c: Context, token: string) {
   });
 }
 
-/** リクエストから JWT を取り出して検証し、ユーザー ID を返す (DB は見ない)。アセット配信のガードにも使う */
+/** ログイン完了の共通処理: ネイティブはトークンをスキームで返し、Web はクッキー */
+function finishLogin(c: Context<AppEnv>, token: string, native: boolean) {
+  if (native) {
+    // トークンはフラグメント (#) で渡す: サーバーログや Referer に残さないため
+    return c.redirect(`${c.env.APP_SCHEME}://auth#token=${token}`);
+  }
+  setSessionCookie(c, token);
+  return c.redirect("/");
+}
+
+/** リクエストから JWT を取り出して検証し、ユーザー ID を返す (DB は見ない) */
 export async function getSessionUserId(c: Context<AppEnv>): Promise<string | null> {
   const authHeader = c.req.header("Authorization");
   const bearer = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : undefined;
@@ -80,8 +123,30 @@ export async function getSessionUserId(c: Context<AppEnv>): Promise<string | nul
   }
 }
 
+function appleConfig(env: Bindings): AppleConfig | null {
+  if (!env.APPLE_TEAM_ID || !env.APPLE_CLIENT_ID || !env.APPLE_KEY_ID || !env.APPLE_PRIVATE_KEY) {
+    return null;
+  }
+  return {
+    teamId: env.APPLE_TEAM_ID,
+    clientId: env.APPLE_CLIENT_ID,
+    keyId: env.APPLE_KEY_ID,
+    privateKey: env.APPLE_PRIVATE_KEY,
+  };
+}
+
 export const authApp = new Hono<AppEnv>();
 
+// クライアントがログインボタンの表示を決めるための情報 (認証不要)
+authApp.get("/providers", (c) => {
+  return c.json({
+    google: !!(c.env.GOOGLE_CLIENT_ID && c.env.GOOGLE_CLIENT_SECRET),
+    apple: !!appleConfig(c.env),
+    dev: c.env.DEV_AUTH === "true",
+  });
+});
+
+// ───────────────────────── Google ─────────────────────────
 // ネイティブアプリからの入口。フラグを立ててから通常の Google フローへ流す
 // (Google 側に登録するリダイレクト URI を /api/auth/google の 1 つに保つため)
 authApp.get("/google/native", (c) => {
@@ -102,30 +167,84 @@ authApp.use("/google", async (c, next) => {
 
 authApp.get("/google", async (c) => {
   const profile = c.get("user-google");
-  if (!profile?.email) return c.redirect("/?error=google");
+  if (!profile?.email || !profile.id) return c.redirect("/?error=google");
 
   const db = drizzle(c.env.DB);
   const token = await loginWithProfile(db, c.env, {
+    provider: "google",
     sub: profile.id,
     email: profile.email,
     name: profile.name ?? profile.email,
     avatarUrl: profile.picture,
   });
 
-  if (getCookie(c, NATIVE_FLOW_COOKIE)) {
-    deleteCookie(c, NATIVE_FLOW_COOKIE, { path: "/api/auth" });
-    // トークンはフラグメント (#) で渡す: サーバーログや Referer に残さないため
-    return c.redirect(`${c.env.APP_SCHEME}://auth#token=${token}`);
-  }
-  setSessionCookie(c, token);
-  return c.redirect("/");
+  const native = !!getCookie(c, NATIVE_FLOW_COOKIE);
+  if (native) deleteCookie(c, NATIVE_FLOW_COOKIE, { path: "/api/auth" });
+  return finishLogin(c, token, native);
 });
 
-// ローカル開発用: Google なしでログイン (DEV_AUTH="true" のときのみ)
+// ───────────────────────── Apple ─────────────────────────
+// Apple は scope 要求時のコールバックがクロスサイトの form POST になるため、
+// SameSite=Lax のクッキーが届かない。ネイティブフラグと CSRF 対策は
+// state (短命 JWT) に載せて往復させる。
+async function startApple(c: Context<AppEnv>, native: boolean) {
+  const config = appleConfig(c.env);
+  if (!config) return c.text("Apple ログインが未設定です (APPLE_* シークレット)", 500);
+  const state = await sign(
+    { purpose: "apple_state", native, exp: Math.floor(Date.now() / 1000) + 600 },
+    c.env.JWT_SECRET,
+  );
+  const redirectUri = new URL("/api/auth/apple/callback", c.req.url).toString();
+  return c.redirect(buildAppleAuthUrl(config, redirectUri, state));
+}
+
+authApp.get("/apple", (c) => startApple(c, false));
+authApp.get("/apple/native", (c) => startApple(c, true));
+
+authApp.post("/apple/callback", async (c) => {
+  const config = appleConfig(c.env);
+  if (!config) return c.text("Apple ログインが未設定です", 500);
+
+  const form = await c.req.parseBody();
+  const code = typeof form.code === "string" ? form.code : null;
+  const state = typeof form.state === "string" ? form.state : null;
+  if (typeof form.error === "string" || !code || !state) return c.redirect("/?error=apple");
+
+  let native = false;
+  try {
+    const payload = await verify(state, c.env.JWT_SECRET, "HS256");
+    if (payload.purpose !== "apple_state") throw new Error("state 不一致");
+    native = payload.native === true;
+  } catch {
+    return c.redirect("/?error=apple");
+  }
+
+  try {
+    const redirectUri = new URL("/api/auth/apple/callback", c.req.url).toString();
+    const profile = await exchangeAppleCode(config, code, redirectUri);
+    const name = parseAppleUserField(typeof form.user === "string" ? form.user : undefined);
+    const db = drizzle(c.env.DB);
+    const token = await loginWithProfile(db, c.env, {
+      provider: "apple",
+      sub: profile.sub,
+      email: profile.email,
+      name,
+    });
+    return finishLogin(c, token, native);
+  } catch (err) {
+    console.error("Apple ログイン失敗:", err);
+    return c.redirect("/?error=apple");
+  }
+});
+
+// ───────────────────────── 開発用・共通 ─────────────────────────
+// ローカル開発用: OAuth なしでログイン (DEV_AUTH="true" のときのみ)
 authApp.get("/dev", async (c) => {
   if (c.env.DEV_AUTH !== "true") return c.notFound();
   const db = drizzle(c.env.DB);
   const token = await loginWithProfile(db, c.env, {
+    provider: "google",
+    sub: "dev-user",
     email: "dev@example.com",
     name: "開発ユーザー",
   });
