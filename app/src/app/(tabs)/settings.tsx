@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { Platform, StyleSheet } from 'react-native';
 
 import { getApiUrlOverride, getBaseUrl, setApiUrlOverride } from '@/api/client';
+import { isMockMode } from '@/api/mock';
 import { useSession } from '@/auth/session';
 import { Button } from '@/components/button';
 import { Card } from '@/components/card';
@@ -32,9 +33,14 @@ export default function SettingsScreen() {
         </ThemedText>
         <ThemedText type="bold">{user?.name}</ThemedText>
         <ThemedText themeColor="textSecondary">{user?.email}</ThemedText>
+        {isMockMode() ? (
+          <ThemedText type="small" themeColor="textMuted">
+            お試しモード中です。データはこの端末にだけ保存され、終了すると削除されます。
+          </ThemedText>
+        ) : null}
         <ConfirmButton
-          title="ログアウト"
-          confirmTitle="もう一度タップでログアウト"
+          title={isMockMode() ? 'お試しモードを終了' : 'ログアウト'}
+          confirmTitle={isMockMode() ? 'もう一度タップで終了 (データ削除)' : 'もう一度タップでログアウト'}
           variant="secondary"
           onConfirm={() => void signOut()}
         />

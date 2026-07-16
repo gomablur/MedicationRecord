@@ -3,6 +3,7 @@ import { StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { getBaseUrl } from '@/api/client';
+import { MOCK_ENABLED } from '@/api/mock';
 import { useSession, type AuthProviders } from '@/auth/session';
 import { Button } from '@/components/button';
 import { ThemedText } from '@/components/themed-text';
@@ -15,7 +16,7 @@ import { useTheme } from '@/hooks/use-theme';
  */
 export default function LoginScreen() {
   const theme = useTheme();
-  const { signInWithGoogle, signInWithApple, signInDev } = useSession();
+  const { signInWithGoogle, signInWithApple, signInMock, signInDev } = useSession();
   const [providers, setProviders] = useState<AuthProviders | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -73,6 +74,19 @@ export default function LoginScreen() {
               onPress={() => void run(signInDev)}
               disabled={busy}
             />
+          ) : null}
+          {MOCK_ENABLED ? (
+            <>
+              <Button
+                title="お試しモード (サンプルデータ)"
+                variant="secondary"
+                onPress={() => void run(signInMock)}
+                disabled={busy}
+              />
+              <ThemedText type="small" themeColor="textMuted" style={styles.center}>
+                お試しモードはログイン不要で、データはこの端末にだけ保存されます。
+              </ThemedText>
+            </>
           ) : null}
           {error ? (
             <ThemedText type="small" themeColor="danger" style={styles.center}>

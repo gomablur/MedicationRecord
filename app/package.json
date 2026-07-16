@@ -6,6 +6,7 @@
   "scripts": {
     "start": "expo start",
     "web": "expo start --web",
+    "web:mock": "EXPO_PUBLIC_ENABLE_MOCK=1 expo start --web",
     "typecheck": "tsc --noEmit",
     "icons": "node scripts/gen-icons.mjs",
     "build:web": "expo export -p web",

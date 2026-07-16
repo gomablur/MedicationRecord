@@ -40,6 +40,10 @@ jobs:
 
       - name: アプリ: 型チェック・Web ビルド検証
         working-directory: app
+        env:
+          # お試しモード(モックデータ)の有効化。本認証の運用に乗ったら
+          # リポジトリ変数 EXPO_PUBLIC_ENABLE_MOCK に 0 を設定してオフにする
+          EXPO_PUBLIC_ENABLE_MOCK: ${{ vars.EXPO_PUBLIC_ENABLE_MOCK || '1' }}
         run: |
           npm ci
           npm run typecheck
@@ -64,6 +68,9 @@ jobs:
             app/package-lock.json
 
       - name: Expo web export → server/public
+        env:
+          # check ジョブと同じ条件でビルドする (お試しモードの有効化フラグ)
+          EXPO_PUBLIC_ENABLE_MOCK: ${{ vars.EXPO_PUBLIC_ENABLE_MOCK || '1' }}
         run: |
           (cd app && npm ci && npm run build:web)
           rm -rf server/public

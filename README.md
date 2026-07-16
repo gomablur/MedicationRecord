@@ -10,6 +10,9 @@ iOS / Android / Web のどこからでも同じデータを参照できる。
   (分割 QR 対応。フォーマットは [docs/jahis-qr-format.md](docs/jahis-qr-format.md))
 - **Google / Apple アカウントでログイン (OAuth2)**: 誰でも登録でき、記録はユーザーごとに分離。
   どの端末からログインしても同じ記録を参照できる (Apple はシークレット設定時のみ有効)
+- **お試しモード**: ログイン不要・サーバー不要で、端末内のサンプルデータで全機能を試せる。
+  ビルド時に `EXPO_PUBLIC_ENABLE_MOCK=1` を指定したときだけログイン画面にボタンが出る
+  (CI では リポジトリ変数 `EXPO_PUBLIC_ENABLE_MOCK` で制御、未設定なら当面オン)
 
 将来対応 (拡張ポイントとして設計のみ): マイナポータル連携、OS ヘルスアプリ連携
 ([docs/ROADMAP.md](docs/ROADMAP.md) 参照)。

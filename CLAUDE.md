@@ -20,6 +20,9 @@
   **API の型を変えたら `app/src/api/types.ts` (手書きミラー) も直すこと**
 - QR 解析はサーバー側 (`server/src/jahis/parser.ts`、テスト付き)。
   流れ: `POST /api/qr/parse` → draft 返却 → クライアントで確認 → `POST /api/records`
+- お試しモード (`app/src/api/mock.ts`): サーバー不要の端末内モック。
+  `EXPO_PUBLIC_ENABLE_MOCK=1` のビルド限定 (CI はリポジトリ変数で制御、未設定なら現状オン)。
+  QR 解析の簡易実装はサーバーのパーサーの代替ではない (本解析は必ずサーバーで)
 
 ## ハマりどころ (参考実装から継承した知見)
 

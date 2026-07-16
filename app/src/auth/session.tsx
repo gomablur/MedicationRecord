@@ -11,6 +11,7 @@ import {
 import { Platform } from 'react-native';
 
 import { api, getBaseUrl, loadApiUrlOverride, setUnauthorizedHandler } from '@/api/client';
+import { isMockMode, loadMockMode, MOCK_USER, setMockMode } from '@/api/mock';
 import type { User } from '@/api/types';
 import { clearToken, loadToken, saveToken } from '@/auth/token';
 
@@ -35,6 +36,8 @@ type Session = {
   loading: boolean;
   signInWithGoogle: () => Promise<void>;
   signInWithApple: () => Promise<void>;
+  /** お試しモード: サーバー不要、端末内のモックデータで全機能を試せる */
+  signInMock: () => Promise<void>;
   /** 開発用ログイン(__DEV__ かつローカルサーバーのみ) */
   signInDev: () => Promise<void>;
   signOut: () => Promise<void>;
@@ -48,6 +51,10 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   const refresh = useCallback(async () => {
+    if (isMockMode()) {
+      setUser(MOCK_USER);
+      return;
+    }
     try {
       const me = await api<User>('/api/me');
       setUser(me);
@@ -63,8 +70,12 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       setUser(null);
     });
     void (async () => {
-      await Promise.all([loadApiUrlOverride(), loadToken()]);
-      await refresh();
+      const [mock] = await Promise.all([loadMockMode(), loadApiUrlOverride(), loadToken()]);
+      if (mock) {
+        setUser(MOCK_USER);
+      } else {
+        await refresh();
+      }
       setLoading(false);
     })();
     return () => setUnauthorizedHandler(null);
@@ -95,6 +106,11 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const signInWithGoogle = useCallback(() => signInWithProvider('google'), [signInWithProvider]);
   const signInWithApple = useCallback(() => signInWithProvider('apple'), [signInWithProvider]);
 
+  const signInMock = useCallback(async () => {
+    await setMockMode(true);
+    setUser(MOCK_USER);
+  }, []);
+
   const signInDev = useCallback(async () => {
     if (Platform.OS === 'web') {
       // Web はサーバー側で Cookie をセットして '/' へリダイレクトする
@@ -109,6 +125,12 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   }, [refresh]);
 
   const signOut = useCallback(async () => {
+    if (isMockMode()) {
+      // お試しモード終了: モックデータも破棄する
+      await setMockMode(false);
+      setUser(null);
+      return;
+    }
     if (Platform.OS === 'web') {
       try {
         await api<{ ok: true }>('/api/auth/logout', { method: 'POST' });
@@ -121,8 +143,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const value = useMemo<Session>(
-    () => ({ user, loading, signInWithGoogle, signInWithApple, signInDev, signOut, refresh }),
-    [user, loading, signInWithGoogle, signInWithApple, signInDev, signOut, refresh],
+    () => ({ user, loading, signInWithGoogle, signInWithApple, signInMock, signInDev, signOut, refresh }),
+    [user, loading, signInWithGoogle, signInWithApple, signInMock, signInDev, signOut, refresh],
   );
 
   return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>;
