@@ -15,7 +15,12 @@
       }
     },
     "android": {
-      "package": "com.goma_b.okusuri"
+      "package": "com.goma_b.okusuri",
+      "adaptiveIcon": {
+        "backgroundImage": "./assets/images/android-icon-background.png",
+        "foregroundImage": "./assets/images/android-icon-foreground.png",
+        "monochromeImage": "./assets/images/android-icon-monochrome.png"
+      }
     },
     "web": {
       "output": "single",
@@ -23,6 +28,14 @@
     },
     "plugins": [
       "expo-router",
+      [
+        "expo-splash-screen",
+        {
+          "backgroundColor": "#17634a",
+          "image": "./assets/images/splash-icon.png",
+          "imageWidth": 96
+        }
+      ],
       "expo-secure-store",
       [
         "expo-camera",

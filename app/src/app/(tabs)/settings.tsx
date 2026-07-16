@@ -7,11 +7,11 @@ import { isMockMode } from '@/api/mock';
 import { useSession } from '@/auth/session';
 import { Button } from '@/components/button';
 import { Card } from '@/components/card';
-import { ConfirmButton } from '@/components/confirm-button';
 import { Field } from '@/components/field';
 import { Screen } from '@/components/screen';
 import { ThemedText } from '@/components/themed-text';
 import { Spacing } from '@/constants/theme';
+import { confirmAsync } from '@/utils/confirm';
 
 /** 設定: アカウント情報・ログアウト・(ネイティブのみ) サーバー URL 上書き */
 export default function SettingsScreen() {
@@ -38,11 +38,24 @@ export default function SettingsScreen() {
             お試しモード中です。データはこの端末にだけ保存され、終了すると削除されます。
           </ThemedText>
         ) : null}
-        <ConfirmButton
+        <Button
           title={isMockMode() ? 'お試しモードを終了' : 'ログアウト'}
-          confirmTitle={isMockMode() ? 'もう一度タップで終了 (データ削除)' : 'もう一度タップでログアウト'}
           variant="secondary"
-          onConfirm={() => void signOut()}
+          onPress={() => {
+            void (async () => {
+              const ok = await confirmAsync(
+                isMockMode()
+                  ? {
+                      title: 'お試しモードを終了しますか?',
+                      message: '端末内のサンプルデータは削除されます。',
+                      confirmLabel: '終了',
+                      destructive: true,
+                    }
+                  : { title: 'ログアウトしますか?', confirmLabel: 'ログアウト' },
+              );
+              if (ok) await signOut();
+            })();
+          }}
         />
       </Card>
 

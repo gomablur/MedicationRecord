@@ -6,11 +6,11 @@ import { deleteRecord, getRecord } from '@/api/records';
 import type { Medication, RecordWithMeds } from '@/api/types';
 import { Button } from '@/components/button';
 import { Card } from '@/components/card';
-import { ConfirmButton } from '@/components/confirm-button';
 import { Screen } from '@/components/screen';
 import { ThemedText } from '@/components/themed-text';
 import { Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
+import { confirmAsync } from '@/utils/confirm';
 import { doseFormLabel, formatDate, formatDose } from '@/utils/format';
 
 /** 記録の詳細: 調剤情報 + 薬の一覧。編集・削除の入口 */
@@ -32,6 +32,13 @@ export default function RecordDetailScreen() {
 
   const remove = useCallback(async () => {
     if (!id) return;
+    const ok = await confirmAsync({
+      title: 'この記録を削除しますか?',
+      message: '削除した記録は元に戻せません。',
+      confirmLabel: '削除',
+      destructive: true,
+    });
+    if (!ok) return;
     try {
       await deleteRecord(id);
       router.back();
@@ -94,12 +101,7 @@ export default function RecordDetailScreen() {
           variant="secondary"
           onPress={() => router.push({ pathname: '/record/new', params: { id: record.id } })}
         />
-        <ConfirmButton
-          title="この記録を削除"
-          confirmTitle="もう一度タップで削除"
-          variant="danger"
-          onConfirm={() => void remove()}
-        />
+        <Button title="この記録を削除" variant="danger" onPress={() => void remove()} />
       </View>
     </Screen>
   );

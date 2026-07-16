@@ -11,7 +11,8 @@
     "icons": "node scripts/gen-icons.mjs",
     "build:web": "expo export -p web",
     "device:ios": "expo run:ios --device",
-    "device:android": "expo run:android --device"
+    "device:android": "expo run:android --device",
+    "android:metro-host": "bash scripts/android-metro-host.sh"
   },
   "dependencies": {
     "@expo/vector-icons": "^15.0.2",
@@ -22,6 +23,7 @@
     "expo-linking": "~57.0.2",
     "expo-router": "~57.0.4",
     "expo-secure-store": "~57.0.0",
+    "expo-splash-screen": "~57.0.2",
     "expo-status-bar": "~57.0.0",
     "expo-web-browser": "~57.0.0",
     "react": "19.2.3",

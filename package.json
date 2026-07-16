@@ -1,6 +1,7 @@
 {
   "name": "medication-record",
   "private": true,
+  "description": "便利スクリプト置き場。意図的に npm workspaces にしていない (Expo/Metro が hoisting と相性が悪く、server と app はデプロイ単位も別のため)。依存は server/ と app/ でそれぞれ npm install すること",
   "scripts": {
     "build:web": "cd app && npm run build:web && rm -rf ../server/public && cp -r dist ../server/public",
     "dev": "cd server && npm run dev",

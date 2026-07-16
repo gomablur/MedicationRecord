@@ -5,6 +5,7 @@
 ## まず読むもの
 
 - [README.md](README.md) — 構成・セットアップ・デプロイ手順
+- [server/README.md](server/README.md) / [app/README.md](app/README.md) — 各パッケージのマップとコマンド
 - [docs/jahis-qr-format.md](docs/jahis-qr-format.md) — QR パーサーの実装根拠 (JAHIS 仕様の要約)
 - [docs/ROADMAP.md](docs/ROADMAP.md) — マイナ連携・ヘルスアプリ連携の調査メモ (未実装の理由込み)
 
@@ -15,6 +16,8 @@
   データ API は全て authMiddleware で保護
 - `app/` — Expo 57 / expo-router。Web は同一オリジンでクッキー認証、
   ネイティブは Bearer トークン (SecureStore) + `okusuri://auth#token=` コールバック
+- ルート package.json は便利スクリプトのみ。**意図的に npm workspaces にしていない**
+  (Expo/Metro の hoisting 問題回避 + デプロイ単位が別)。install は各ディレクトリで行う
 - DB: D1 + Drizzle。スキーマの正は `server/src/db/schema.ts` (migrations/ はそこから生成)
 - ID は UUIDv7。入力検証は Zod (`server/src/schemas.ts`)。
   **API の型を変えたら `app/src/api/types.ts` (手書きミラー) も直すこと**
@@ -29,7 +32,9 @@
 - **D1 は 1 クエリ 100 SQL 変数まで** → `util.ts` の `chunks()/VAR_CHUNK` で分割済み。新しい IN 句・一括 INSERT でも必ず使う
 - Drizzle の sql`` 相関サブクエリで `${table.column}` は未修飾カラムになる → 2 段クエリにするか列名リテラルで書く
 - Secure クッキーは http では保存されない → auth.ts は https のときだけ `secure` を付ける
-- iOS PWA では `window.confirm` が動かないことがある → アプリ側は 2 タップ確認 (ConfirmButton)
+- 確認ダイアログは OS 標準 (`utils/confirm.ts`: ネイティブ=Alert / Web=window.confirm)。
+  **PWA (ホーム画面追加) は想定しない**方針のため window.confirm でよい (ユーザー確認済み)。
+  PWA 化するなら iOS で confirm が効かない問題があるので 2 タップ確認方式に戻すこと
 - `npm audit fix --force` 禁止 (drizzle-kit が壊れる)
 - Expo: ネイティブ SDK の import は `native.*.ts` に隔離 / `ios/` `android/` は CNG 管理でコミットしない /
   `EXPO_UNSTABLE_HEADLESS=1` 使用禁止

@@ -1,13 +1,21 @@
 #!/usr/bin/env node
-// プレースホルダアプリアイコンの生成(依存パッケージなし)。
-// 絵柄: 深緑の背景に白い十字(薬局マーク)+カプセル型の窓。凝らない方針。
-// 再生成: `npm run icons`
+// アプリアイコン一式の生成(依存パッケージなし: RGBAバッファに描画してzlibでPNGエンコード)。
+// 絵柄: 深緑グラデーションの背景 + 白い十字(薬局マーク)。再生成: `npm run icons`
+//
+// Android アダプティブアイコンの注意 (health-assistant から継承した知見):
+//   - 108dp キャンバスのうち中央 72dp しか表示されず、ランチャーが切り出して拡大する。
+//     iOS と絵の大きさを揃えるため、前景・モノクロームは 72/108 倍に縮小して描く
+//   - 前景レイヤーのセーフゾーンは中心(50,50)・半径33の**円**。はみ出すとマスク形状に
+//     よっては切れる (十字は最遠点 ≈ 32 で、縮小後はさらに余裕がある)
+//   - 透明背景レイヤーのダウンサンプリングは**アルファ加重平均**にする。単純平均だと
+//     透明ピクセルの黒が混ざり、グリフの縁に黒いフリンジが出る
 import { deflateSync } from "node:zlib";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const IMAGES = join(dirname(fileURLToPath(import.meta.url)), "..", "assets", "images");
+const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
+const IMAGES = join(ROOT, "assets", "images");
 mkdirSync(IMAGES, { recursive: true });
 
 // ---- 最小PNGエンコーダ ----
@@ -48,34 +56,52 @@ function encodePng(rgba, size) {
   ]);
 }
 
-const BG = [0x1f, 0x7a, 0x5c]; // 深緑(theme.ts の tintFill と同系)
-const FG = [0xff, 0xff, 0xff];
+// ---- 色 (theme.ts の tintFill 系) ----
+const BG_TOP = [0x27, 0x8a, 0x69]; // 上: 少し明るい緑
+const BG_BOTTOM = [0x17, 0x63, 0x4a]; // 下: 深い緑
+const WHITE = [0xff, 0xff, 0xff];
+
+// ---- 十字の形状 (論理座標: 中心0、半径0.5 の正方形) ----
+const CROSS = { armHw: 0.11, armLen: 0.3 }; // 半幅・腕の長さ。最遠点 ≈ 0.32 (セーフゾーン0.33内)
+const ADAPTIVE_SCALE = 72 / 108;
 
 /**
  * @param {number} size 出力ピクセル
- * @param {boolean} rounded 角丸(favicon 用)。角丸の外は透明
+ * @param {object} opts
+ * @param {"gradient"|"transparent"|"rounded"} opts.bg 背景 (rounded=角丸グラデ、外は透明)
+ * @param {boolean} opts.cross 十字を描くか
+ * @param {number} opts.scale 十字の縮尺 (Androidレイヤーは 72/108)
  */
-function drawIcon(size, rounded = false) {
+function drawIcon(size, { bg = "gradient", cross = true, scale = 1 } = {}) {
   const S = 4; // スーパーサンプリング
   const W = size * S;
   const buf = new Uint8Array(W * W * 4);
-  const armHw = 0.11; // 十字の腕の半幅(論理 0-1)
-  const armLen = 0.30; // 十字の腕の長さ(中心から)
-  const rr = 0.22; // 角丸半径
+  const rr = 0.22; // 角丸半径 (favicon 用)
   for (let y = 0; y < W; y++) {
     for (let x = 0; x < W; x++) {
       const lx = x / W - 0.5;
       const ly = y / W - 0.5;
-      // 角丸判定
-      if (rounded) {
+      if (bg === "rounded") {
         const cx = Math.max(Math.abs(lx) - (0.5 - rr), 0);
         const cy = Math.max(Math.abs(ly) - (0.5 - rr), 0);
-        if (cx * cx + cy * cy > rr * rr) continue; // 透明のまま
+        if (cx * cx + cy * cy > rr * rr) continue; // 角丸の外は透明のまま
       }
-      const cross =
-        (Math.abs(lx) <= armHw && Math.abs(ly) <= armLen) ||
-        (Math.abs(ly) <= armHw && Math.abs(lx) <= armLen);
-      const c = cross ? FG : BG;
+      const inCross =
+        cross &&
+        ((Math.abs(lx) <= CROSS.armHw * scale && Math.abs(ly) <= CROSS.armLen * scale) ||
+          (Math.abs(ly) <= CROSS.armHw * scale && Math.abs(lx) <= CROSS.armLen * scale));
+      let c = null;
+      if (inCross) {
+        c = WHITE;
+      } else if (bg !== "transparent") {
+        const t = y / W; // 上→下グラデーション
+        c = [
+          BG_TOP[0] + (BG_BOTTOM[0] - BG_TOP[0]) * t,
+          BG_TOP[1] + (BG_BOTTOM[1] - BG_TOP[1]) * t,
+          BG_TOP[2] + (BG_BOTTOM[2] - BG_TOP[2]) * t,
+        ];
+      }
+      if (!c) continue;
       const i = (y * W + x) * 4;
       buf[i] = c[0];
       buf[i + 1] = c[1];
@@ -83,7 +109,7 @@ function drawIcon(size, rounded = false) {
       buf[i + 3] = 255;
     }
   }
-  // ダウンサンプリング(アルファ加重平均。透明縁の黒フリンジ防止)
+  // ダウンサンプリング (アルファ加重平均)
   const out = Buffer.alloc(size * size * 4);
   for (let y = 0; y < size; y++) {
     for (let x = 0; x < size; x++) {
@@ -110,6 +136,20 @@ function drawIcon(size, rounded = false) {
   return encodePng(out, size);
 }
 
-writeFileSync(join(IMAGES, "icon.png"), drawIcon(1024));
-writeFileSync(join(IMAGES, "favicon.png"), drawIcon(64, true));
-console.log("✓ assets/images/icon.png, favicon.png を生成しました");
+// ---- 出力 (Expo の構成に合わせる) ----
+const targets = [
+  // メインアイコン (iOS・ストア用): グラデ背景 + 十字
+  ["icon.png", drawIcon(1024)],
+  // Android adaptive icon: 背景=グラデのみ(全面ブリード) / 前景=十字のみ(縮小して描く)
+  ["android-icon-background.png", drawIcon(1024, { cross: false })],
+  ["android-icon-foreground.png", drawIcon(1024, { bg: "transparent", scale: ADAPTIVE_SCALE })],
+  ["android-icon-monochrome.png", drawIcon(1024, { bg: "transparent", scale: ADAPTIVE_SCALE })],
+  // スプラッシュ: 背景色 (app.json) の上に白十字のみ
+  ["splash-icon.png", drawIcon(512, { bg: "transparent" })],
+  // Web favicon: 角丸スクエア
+  ["favicon.png", drawIcon(64, { bg: "rounded" })],
+];
+for (const [name, png] of targets) {
+  writeFileSync(join(IMAGES, name), png);
+  console.log(`✓ assets/images/${name}`);
+}
