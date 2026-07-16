@@ -31,14 +31,14 @@ jobs:
             server/package-lock.json
             app/package-lock.json
 
-      - name: サーバー: テスト・型チェック
+      - name: "サーバー: テスト・型チェック"
         working-directory: server
         run: |
           npm ci
           npm test
           npm run typecheck
 
-      - name: アプリ: 型チェック・Web ビルド検証
+      - name: "アプリ: 型チェック・Web ビルド検証"
         working-directory: app
         env:
           # お試しモード(モックデータ)の有効化。本認証の運用に乗ったら
