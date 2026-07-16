@@ -291,21 +291,25 @@ export async function mockParseQr(payloads: string[]): Promise<QrParseResult> {
     // JAHIS として読めない入力 → サンプルの下書きで画面の流れを確認できるようにする
     return {
       status: 'ok',
-      draft: {
-        dispensedAt: today,
-        pharmacyName: 'サンプル薬局 (お試しモード)',
-        source: 'qr',
-        notes: 'お試しモードのため、読み取り内容に関わらずサンプルを表示しています。',
-        medications: [
-          { name: 'サンプル薬A錠 １０ｍｇ', dose: '1', doseUnit: '錠', usageText: '1日1回 朝食後', quantity: '14', quantityUnit: '日分' },
-        ],
-      },
+      drafts: [
+        {
+          dispensedAt: today,
+          pharmacyName: 'サンプル薬局 (お試しモード)',
+          source: 'qr',
+          notes: 'お試しモードのため、読み取り内容に関わらずサンプルを表示しています。',
+          medications: [
+            { name: 'サンプル薬A錠 １０ｍｇ', dose: '1', doseUnit: '錠', usageText: '1日1回 朝食後', quantity: '14', quantityUnit: '日分' },
+          ],
+        },
+      ],
       memos: [],
     };
   }
   return {
     status: 'ok',
-    draft: { dispensedAt: dispensedAt ?? today, pharmacyName: pharmacyName ?? null, source: 'qr', medications: meds },
+    drafts: [
+      { dispensedAt: dispensedAt ?? today, pharmacyName: pharmacyName ?? null, source: 'qr', medications: meds },
+    ],
     memos: [],
   };
 }

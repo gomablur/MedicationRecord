@@ -53,7 +53,7 @@ npm run db:migrate:remote # 本番 D1 へ適用 (通常は CI に任せる)
 | GET /api/records?q= | 記録一覧 (調剤日降順、薬名・薬局名検索) |
 | POST /api/records | 記録作成 |
 | GET/PUT/DELETE /api/records/:id | 記録の取得・更新 (薬は全置換)・削除 |
-| POST /api/qr/parse | JAHIS QR 解析 → 下書き返却 (分割 QR は needsMore を返す) |
+| POST /api/qr/parse | JAHIS QR / 移行ファイル解析 → 下書き (複数可) 返却。分割 QR は needsMore |
 
 ## シークレット (wrangler secret put)
 

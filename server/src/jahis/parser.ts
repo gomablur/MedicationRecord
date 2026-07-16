@@ -4,8 +4,12 @@
  * 概要は docs/jahis-qr-format.md 参照。
  *
  * データはカンマ区切りレコードの改行連結で、先頭行が "JAHISTCnn,出力区分"。
- * 容量超過時はレコード単位で複数 QR に分割され、各データに分割制御レコード
- * (No.911: データ固有ID, 分割数, 連番) が入る。
+ * 対応している入力の形:
+ *   - 通常の QR 1 枚 (1 ペイロード = 1 データ)
+ *   - 分割 QR (No.911 分割制御レコード)。全部そろうまで needsMore を返す
+ *   - 複数データの一括入力 (データ移行のファイルアップロード想定)。
+ *     ペイロードごとに独立したデータとして解析する
+ *   - 1 データ内に複数の調剤 (No.5 調剤等年月日が複数)。調剤ごとにグループ分割する
  */
 
 /** 薬 1 品目 (No.201) + 同一 RP 番号の用法 (No.301) を展開したもの */
@@ -25,12 +29,8 @@ export type JahisMedication = {
   notes: string[];
 };
 
-export type JahisData = {
-  /** JAHISTCnn の nn (バージョン番号) */
-  version: number;
-  /** 1: 医療機関→患者、2: 患者→医療機関 */
-  outputType?: number;
-  patientName?: string;
+/** 1 回の調剤 (No.5 で区切られるグループ)。アプリの「記録」1 件に対応する */
+export type JahisDispenseGroup = {
   /** 調剤等年月日 (No.5) を YYYY-MM-DD に正規化したもの */
   dispensedAt?: string;
   /** 調剤した薬局・医療機関 (No.11) */
@@ -45,12 +45,23 @@ export type JahisData = {
   medications: JahisMedication[];
   /** 服用注意 (401)・医療機関等提供情報 (411)・残薬確認 (421)・備考 (501) */
   generalNotes: string[];
+};
+
+/** 1 つの JAHIS データ (= 1 QR または 1 ファイル) */
+export type JahisData = {
+  /** JAHISTCnn の nn (バージョン番号) */
+  version: number;
+  /** 1: 医療機関→患者、2: 患者→医療機関 */
+  outputType?: number;
+  patientName?: string;
   /** 手帳メモ (4)・患者等記入 (601)・患者特記 (2) */
   memos: string[];
+  /** 調剤グループ (通常の QR は 1 つ。移行データは複数になりうる) */
+  groups: JahisDispenseGroup[];
 };
 
 export type JahisParseResult =
-  | { status: "ok"; data: JahisData }
+  | { status: "ok"; datas: JahisData[] }
   | {
       /** 分割データの一部のみ受信。total 個そろうまで追加スキャンが必要 */
       status: "needsMore";
@@ -105,16 +116,18 @@ function toRows(payload: string): Row[] {
 const VERSION_RE = /^JAHISTC(\d{2})$/;
 
 /**
- * QR ペイロード群 (分割されている場合は複数) を解析する。
- * - 分割データ (No.911) がそろっていなければ needsMore を返す
- * - 同一ペイロードの重複スキャンは無視する
+ * QR ペイロード群 (またはアップロードされたファイル内容群) を解析する。
+ * - 分割データ (No.911) は同一 ID でグルーピングし、そろっていなければ needsMore
+ * - 分割でないペイロードはそれぞれ独立した 1 データとして解析する
+ * - 同一ペイロードの重複は無視する
  */
 export function parseJahis(payloads: string[]): JahisParseResult {
   const unique = [...new Set(payloads.map((p) => p.trim()).filter((p) => p.length > 0))];
   if (unique.length === 0) return { status: "error", error: "データが空です" };
 
   type Part = { rows: Row[]; version: number; outputType?: number; split?: { id: string; total: number; seq: number } };
-  const parts: Part[] = [];
+  const standalone: Part[] = [];
+  const splitGroups = new Map<string, Part[]>();
 
   for (const payload of unique) {
     const rows = toRows(payload);
@@ -134,44 +147,63 @@ export function parseJahis(payloads: string[]): JahisParseResult {
       if (!id || !total || !seq) return { status: "error", error: "分割制御レコード (911) が不正です" };
       part.split = { id, total: Number(total), seq: Number(seq) };
       part.rows = part.rows.filter((r) => r[0] !== "911");
+      const group = splitGroups.get(id) ?? [];
+      group.push(part);
+      splitGroups.set(id, group);
+    } else {
+      standalone.push(part);
     }
-    parts.push(part);
   }
 
-  let rows: Row[];
-  const first = parts[0]!;
-  if (parts.some((p) => p.split)) {
-    if (!parts.every((p) => p.split)) {
-      return { status: "error", error: "分割データと非分割データが混在しています" };
-    }
-    const splitId = first.split!.id;
-    const total = first.split!.total;
-    if (parts.some((p) => p.split!.id !== splitId || p.split!.total !== total)) {
-      return { status: "error", error: "異なるお薬手帳データの QR が混ざっています" };
-    }
+  // 分割グループを検証・結合。そろっていないものがあれば needsMore
+  const documents: Part[] = [];
+  for (const [splitId, parts] of splitGroups) {
+    const total = parts[0]!.split!.total;
     const bySeq = new Map(parts.map((p) => [p.split!.seq, p]));
     const received = [...bySeq.keys()].sort((a, b) => a - b);
     if (received.length < total) {
       return { status: "needsMore", splitId, total, received };
     }
-    rows = received.flatMap((seq) => bySeq.get(seq)!.rows);
-  } else {
-    if (parts.length > 1) {
-      return { status: "error", error: "分割制御レコードのない QR が複数あります (1 枚ずつ取り込んでください)" };
-    }
-    rows = first.rows;
+    documents.push({
+      rows: received.flatMap((seq) => bySeq.get(seq)!.rows),
+      version: parts[0]!.version,
+      outputType: parts[0]!.outputType,
+    });
   }
+  documents.push(...standalone);
 
-  return { status: "ok", data: interpret(rows, first.version, first.outputType) };
+  const datas = documents.map((doc) => interpret(doc.rows, doc.version, doc.outputType));
+  if (datas.every((d) => d.groups.every((g) => g.medications.length === 0))) {
+    return { status: "error", error: "薬品情報が含まれていません" };
+  }
+  return { status: "ok", datas };
 }
 
-/** レコード行の配列を JahisData に組み立てる */
+/** レコード行の配列を JahisData に組み立てる。No.5 (調剤等年月日) ごとにグループ分割する */
 function interpret(rows: Row[], version: number, outputType: number | undefined): JahisData {
-  const data: JahisData = { version, outputType, medications: [], generalNotes: [], memos: [] };
+  const data: JahisData = { version, outputType, memos: [], groups: [] };
 
-  // RP 番号 → その RP に属する薬 (201 の出現順を保持)
-  const medsByRp = new Map<number, JahisMedication[]>();
-  const doctors: string[] = [];
+  const newGroup = (): JahisDispenseGroup => ({ medications: [], generalNotes: [] });
+  // No.5 より前に調剤系レコードが来る非標準データも受けられるよう、遅延生成にする
+  let group: JahisDispenseGroup | null = null;
+  const current = (): JahisDispenseGroup => {
+    if (!group) {
+      group = newGroup();
+      data.groups.push(group);
+    }
+    return group;
+  };
+
+  // RP 番号 → その RP に属する薬 (グループ内でのみ有効。No.5 でリセット)
+  let medsByRp = new Map<number, JahisMedication[]>();
+  let doctors: string[] = [];
+
+  const closeGroup = () => {
+    if (group && doctors.length > 0) group.doctorName = doctors.join("、");
+    medsByRp = new Map();
+    doctors = [];
+    group = null;
+  };
 
   const field = (row: Row, i: number): string | undefined => {
     const v = row[i]?.trim();
@@ -196,21 +228,22 @@ function interpret(rows: Row[], version: number, outputType: number | undefined)
         if (memo) data.memos.push(memo);
         break;
       }
-      case "5": // 調剤等年月日: 年月日,作成者
-        data.dispensedAt ??= parseJahisDate(row[1]);
+      case "5": // 調剤等年月日: 年月日,作成者 — ここから新しい調剤グループ
+        closeGroup();
+        current().dispensedAt = parseJahisDate(row[1]);
         break;
       case "11": // 調剤-医療機関等: 名称,都道府県,点数表,コード,郵便番号,住所,電話,作成者
-        data.pharmacyName ??= field(row, 1);
-        data.pharmacyPhone ??= field(row, 7);
+        current().pharmacyName ??= field(row, 1);
+        current().pharmacyPhone ??= field(row, 7);
         break;
       case "15": // 調剤-医師・薬剤師: 氏名,連絡先,作成者
-        data.dispenserName ??= field(row, 1);
+        current().dispenserName ??= field(row, 1);
         break;
       case "51": // 処方-医療機関: 名称,都道府県,点数表,コード,作成者
-        data.hospitalName ??= field(row, 1);
+        current().hospitalName ??= field(row, 1);
         break;
       case "55": {
-        // 処方-医師: 氏名,診療科,作成者 (複数回出現しうる)
+        // 処方-医師: 氏名,診療科,作成者 (グループ内に複数回出現しうる)
         const name = field(row, 1);
         const dept = field(row, 2);
         if (name) doctors.push(dept ? `${name} (${dept})` : name);
@@ -229,11 +262,11 @@ function interpret(rows: Row[], version: number, outputType: number | undefined)
           genericName: field(row, 8),
           notes: [],
         };
-        data.medications.push(med);
+        current().medications.push(med);
         if (med.rpNumber !== null) {
-          const group = medsByRp.get(med.rpNumber) ?? [];
-          group.push(med);
-          medsByRp.set(med.rpNumber, group);
+          const list = medsByRp.get(med.rpNumber) ?? [];
+          list.push(med);
+          medsByRp.set(med.rpNumber, list);
         }
         break;
       }
@@ -266,12 +299,12 @@ function interpret(rows: Row[], version: number, outputType: number | undefined)
       case "421": // 残薬確認: 内容,作成者
       case "501": { // 備考: 内容,作成者
         const note = field(row, 1);
-        if (note) data.generalNotes.push(note);
+        if (note) current().generalNotes.push(note);
         break;
       }
       case "411": { // 医療機関等提供情報: 内容,提供情報種別,作成者
         const note = field(row, 1);
-        if (note) data.generalNotes.push(note);
+        if (note) current().generalNotes.push(note);
         break;
       }
       case "601": { // 患者等記入: 内容,入力年月日
@@ -284,8 +317,10 @@ function interpret(rows: Row[], version: number, outputType: number | undefined)
         break;
     }
   }
+  closeGroup();
 
-  if (doctors.length > 0) data.doctorName = doctors.join("、");
+  // 薬のない空グループ (メモだけのデータ等) は落とす
+  data.groups = data.groups.filter((g) => g.medications.length > 0 || g.generalNotes.length > 0);
   return data;
 }
 

@@ -10,7 +10,7 @@ src/
   app/              expo-router 画面
     _layout.tsx     ルート (SessionProvider + Stack.Protected で認証ガード)
     login.tsx       ログイン (Google/Apple/お試し。ボタンは /api/auth/providers で出し分け)
-    (tabs)/         メイン3タブ: index=記録一覧 / scan=QR取り込み / settings=設定
+    (tabs)/         メイン3タブ: index=記録一覧 / scan=QR取り込み(Webは移行ファイルのアップロード) / settings=設定
     record/[id].tsx 記録詳細 / record/new.tsx 入力フォーム (新規・編集・QR確認)
   api/
     client.ts       fetch ラッパー (ベースURL解決・Bearer付与・401共通処理)

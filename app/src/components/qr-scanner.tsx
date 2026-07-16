@@ -8,8 +8,8 @@ import { Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 
 export type QrScannerProps = {
-  /** QR を1枚読み取るたびに呼ばれる */
-  onPayload: (payload: string) => void;
+  /** データが読み取れるたびに呼ばれる (カメラは1件ずつ、Webのファイルは複数まとめて) */
+  onPayloads: (payloads: string[]) => void;
   /** 解析中など、読み取りを一時停止したいとき true */
   paused?: boolean;
 };
@@ -19,7 +19,7 @@ export type QrScannerProps = {
  * 貼り付けフォールバックに分岐する。
  * 同じコードを向け続けたときの連続発火はここで抑制する。
  */
-export function QrScanner({ onPayload, paused }: QrScannerProps) {
+export function QrScanner({ onPayloads, paused }: QrScannerProps) {
   const theme = useTheme();
   const [permission, requestPermission] = useCameraPermissions();
   const lastData = useRef<string | null>(null);
@@ -54,7 +54,7 @@ export function QrScanner({ onPayload, paused }: QrScannerProps) {
           if (data === lastData.current && now - lastAt.current < 3000) return;
           lastData.current = data;
           lastAt.current = now;
-          onPayload(data);
+          onPayloads([data]);
         }}
       />
     </View>

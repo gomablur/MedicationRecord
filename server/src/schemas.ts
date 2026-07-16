@@ -31,8 +31,8 @@ export const recordInputSchema = z.object({
 });
 
 export const qrParseSchema = z.object({
-  // 分割 QR に対応するため複数ペイロードを受け付ける
-  payloads: z.array(z.string().max(20000)).min(1).max(10),
+  // 分割 QR と移行ファイルの一括アップロードに対応するため複数ペイロードを受け付ける
+  payloads: z.array(z.string().max(100000)).min(1).max(50),
 });
 
 export type RecordInput = z.infer<typeof recordInputSchema>;

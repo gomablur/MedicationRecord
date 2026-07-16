@@ -1,25 +1,26 @@
-// JAHIS お薬手帳 QR の解析エンドポイント。
-// 解析結果は保存せず、RecordInput 互換の下書き (draft) として返す。
+// JAHIS お薬手帳 QR / 移行ファイルの解析エンドポイント。
+// 解析結果は保存せず、RecordInput 互換の下書き (drafts) として返す。
 // クライアントは内容をユーザーに確認させてから POST /api/records で保存する。
+// 移行ファイル (複数データ・複数調剤) では drafts が複数件になる。
 import { Hono } from "hono";
 import { zValidator } from "@hono/zod-validator";
-import { parseJahis, type JahisData } from "../jahis/parser";
+import { parseJahis, type JahisDispenseGroup } from "../jahis/parser";
 import { qrParseSchema, type RecordInput } from "../schemas";
 import type { AppEnv } from "../env";
 
-/** 解析結果を保存用の入力 (RecordInput) に変換する */
-function toDraft(data: JahisData, payloads: string[]): RecordInput {
+/** 調剤グループ 1 つを保存用の入力 (RecordInput) に変換する */
+function toDraft(group: JahisDispenseGroup, rawQr: string | null): RecordInput {
   const today = new Date().toISOString().slice(0, 10);
   return {
-    dispensedAt: data.dispensedAt ?? today,
-    pharmacyName: data.pharmacyName ?? null,
-    pharmacyPhone: data.pharmacyPhone ?? null,
-    hospitalName: data.hospitalName ?? null,
-    doctorName: data.doctorName ?? null,
-    notes: data.generalNotes.length > 0 ? data.generalNotes.join("\n") : null,
+    dispensedAt: group.dispensedAt ?? today,
+    pharmacyName: group.pharmacyName ?? null,
+    pharmacyPhone: group.pharmacyPhone ?? null,
+    hospitalName: group.hospitalName ?? null,
+    doctorName: group.doctorName ?? null,
+    notes: group.generalNotes.length > 0 ? group.generalNotes.join("\n") : null,
     source: "qr",
-    rawQr: payloads.join("\n===JAHIS-PART===\n"),
-    medications: data.medications.map((m) => ({
+    rawQr,
+    medications: group.medications.map((m) => ({
       rpNumber: m.rpNumber,
       name: m.name,
       dose: m.dose ?? null,
@@ -53,13 +54,19 @@ qrApp.post("/parse", zValidator("json", qrParseSchema), async (c) => {
       received: result.received,
     });
   }
-  if (result.data.medications.length === 0) {
-    return c.json({ error: "QR に薬品情報が含まれていません" }, 400);
+
+  const groups = result.datas.flatMap((d) => d.groups).filter((g) => g.medications.length > 0);
+  if (groups.length === 0) {
+    return c.json({ error: "薬品情報が含まれていません" }, 400);
   }
+  // 生データの保持は単一記録のときだけ (移行の一括取り込みで全記録に同じ生データを
+  // 重複保存するとテーブルが不必要に膨らむため)
+  const rawQr = groups.length === 1 ? payloads.join("\n===JAHIS-PART===\n") : null;
+  const memos = [...new Set(result.datas.flatMap((d) => d.memos))];
   return c.json({
     status: "ok" as const,
-    draft: toDraft(result.data, payloads),
-    patientName: result.data.patientName,
-    memos: result.data.memos,
+    drafts: groups.map((g) => toDraft(g, rawQr)),
+    patientName: result.datas.find((d) => d.patientName)?.patientName,
+    memos,
   });
 });

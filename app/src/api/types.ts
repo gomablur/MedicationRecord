@@ -67,7 +67,8 @@ export type RecordInput = {
   medications: MedicationInput[];
 };
 
-/** POST /api/qr/parse のレスポンス(200 のバリエーション) */
+/** POST /api/qr/parse のレスポンス(200 のバリエーション)。
+ * 移行ファイル(複数データ・複数調剤)では drafts が複数件になる */
 export type QrParseResult =
-  | { status: 'ok'; draft: RecordInput; patientName?: string; memos: string[] }
+  | { status: 'ok'; drafts: RecordInput[]; patientName?: string; memos: string[] }
   | { status: 'needsMore'; splitId: string; total: number; received: number[] };
