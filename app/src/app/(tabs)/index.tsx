@@ -98,6 +98,10 @@ function RecordCard({ record }: { record: RecordWithMeds }) {
   const theme = useTheme();
   const shown = record.medications.slice(0, 4);
   const rest = record.medications.length - shown.length;
+  // 主役は処方元の病院名 (どこの診察の薬かが一番知りたい情報)。
+  // 病院名がない記録は薬局名で代替し、両方あるときだけ薬局名を小さく添える
+  const title = record.hospitalName ?? record.pharmacyName;
+  const sub = record.hospitalName ? record.pharmacyName : null;
   return (
     <Link href={{ pathname: '/record/[id]', params: { id: record.id } }} asChild>
       <Card style={styles.card}>
@@ -113,7 +117,12 @@ function RecordCard({ record }: { record: RecordWithMeds }) {
             </View>
           ) : null}
         </View>
-        {record.pharmacyName ? <ThemedText type="bold">{record.pharmacyName}</ThemedText> : null}
+        {title ? <ThemedText type="bold">{title}</ThemedText> : null}
+        {sub ? (
+          <ThemedText type="small" themeColor="textMuted">
+            {sub}
+          </ThemedText>
+        ) : null}
         <View style={styles.meds}>
           {shown.map((med) => (
             <ThemedText key={med.id} type="small" themeColor="textSecondary" numberOfLines={1}>
