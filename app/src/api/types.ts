@@ -7,6 +7,9 @@ export type User = {
   id: string;
   email: string;
   name: string;
+  /** アカウント連携の状態 (設定画面の表示用) */
+  linkedGoogle: boolean;
+  linkedApple: boolean;
 };
 
 export type Medication = {

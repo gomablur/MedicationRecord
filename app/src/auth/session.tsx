@@ -36,6 +36,8 @@ type Session = {
   loading: boolean;
   signInWithGoogle: () => Promise<void>;
   signInWithApple: () => Promise<void>;
+  /** ログイン中のユーザーにもう一方のプロバイダを紐づける (Apple のメール非公開対策) */
+  linkProvider: (provider: 'google' | 'apple') => Promise<void>;
   /** お試しモード: サーバー不要、端末内のモックデータで全機能を試せる */
   signInMock: () => Promise<void>;
   /** 開発用ログイン(__DEV__ かつローカルサーバーのみ) */
@@ -106,6 +108,28 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const signInWithGoogle = useCallback(() => signInWithProvider('google'), [signInWithProvider]);
   const signInWithApple = useCallback(() => signInWithProvider('apple'), [signInWithProvider]);
 
+  const linkProvider = useCallback(
+    async (provider: 'google' | 'apple') => {
+      if (Platform.OS === 'web') {
+        // Web はセッションクッキーで連携対象が分かる。完了後 /settings に戻ってくる
+        window.location.href = `${getBaseUrl()}/api/auth/${provider}/link`;
+        return;
+      }
+      // ネイティブ: ブラウザにはセッションがないため、短命の連携トークンで引き継ぐ
+      const { token } = await api<{ token: string }>('/api/auth/link-token', { method: 'POST' });
+      const result = await WebBrowser.openAuthSessionAsync(
+        `${getBaseUrl()}/api/auth/${provider}/link?lt=${encodeURIComponent(token)}&native=1`,
+        'okusuri://auth',
+      );
+      if (result.type !== 'success') return;
+      if (/[#&]error=/.test(result.url)) {
+        throw new Error('連携できませんでした。そのアカウントで既に別のユーザーが作成されている可能性があります。');
+      }
+      await refresh();
+    },
+    [refresh],
+  );
+
   const signInMock = useCallback(async () => {
     await setMockMode(true);
     setUser(MOCK_USER);
@@ -143,8 +167,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const value = useMemo<Session>(
-    () => ({ user, loading, signInWithGoogle, signInWithApple, signInMock, signInDev, signOut, refresh }),
-    [user, loading, signInWithGoogle, signInWithApple, signInMock, signInDev, signOut, refresh],
+    () => ({ user, loading, signInWithGoogle, signInWithApple, linkProvider, signInMock, signInDev, signOut, refresh }),
+    [user, loading, signInWithGoogle, signInWithApple, linkProvider, signInMock, signInDev, signOut, refresh],
   );
 
   return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>;

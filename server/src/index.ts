@@ -4,7 +4,7 @@
 // SPA は誰にでも配信し、ログイン画面はアプリ側 (Expo 共通の login 画面) が出す。
 // データは /api/* が認証必須なので未ログインでは何も見えない。
 import { Hono } from "hono";
-import { authApp, authMiddleware } from "./auth";
+import { authApp, authMiddleware, issueLinkToken } from "./auth";
 import { recordsApp } from "./routes/records";
 import { qrApp } from "./routes/qr";
 import type { AppEnv } from "./env";
@@ -16,6 +16,11 @@ app.route("/api/auth", authApp);
 app.use("/api/*", authMiddleware);
 
 app.get("/api/me", (c) => c.json(c.var.user));
+// アカウント連携用の短命トークン (ネイティブアプリがブラウザへ連携フローを引き継ぐ)。
+// authApp には認証がかからないため、認証必須のこのルートだけここに置く
+app.post("/api/auth/link-token", async (c) => {
+  return c.json({ token: await issueLinkToken(c.env, c.var.user.id) });
+});
 app.route("/api/records", recordsApp);
 app.route("/api/qr", qrApp);
 

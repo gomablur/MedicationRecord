@@ -21,6 +21,8 @@ export const MOCK_USER: User = {
   id: 'mock-user',
   email: 'guest@example.com',
   name: 'ゲスト (お試しモード)',
+  linkedGoogle: false,
+  linkedApple: false,
 };
 
 let mockMode = false;

@@ -46,6 +46,9 @@
 - シークレット: GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET / JWT_SECRET (wrangler secret)。
   任意で APPLE_TEAM_ID / APPLE_CLIENT_ID / APPLE_KEY_ID / APPLE_PRIVATE_KEY (Apple ログイン。
   未設定なら自動で無効、ボタンも出ない)。ログインボタンの出し分けは `/api/auth/providers`
+- アカウント連携: Apple の「メールを非公開」対策として、設定画面からログイン中ユーザーに
+  別プロバイダの sub を紐づけられる (`/api/auth/*/link`)。既に別ユーザーが持つ sub とは
+  連携できない (アカウント統合はしない方針)
 - ネイティブビルドはユーザーが Mac 側で実施 (コンテナからは不可)
 
 ## 作業ルール

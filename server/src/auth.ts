@@ -109,6 +109,67 @@ function finishLogin(c: Context<AppEnv>, token: string, native: boolean) {
   return c.redirect("/");
 }
 
+// ─────────────── アカウント連携 (Apple のメール非公開対策) ───────────────
+// Apple はプライベートリレーのメールを返すことがあり、メール一致による自動紐づけが
+// 効かない。ログイン中のユーザーがもう一方のプロバイダを明示的に連携できるようにする。
+// フロー: 設定画面 → /api/auth/<provider>/link → OAuth → コールバックで sub を現ユーザーに紐づけ
+
+const LINK_COOKIE = "auth_link";
+const LINK_TOKEN_MINUTES = 10;
+
+/** ネイティブアプリがブラウザへ連携フローを引き継ぐための短命トークンを発行する */
+export async function issueLinkToken(env: { JWT_SECRET: string }, userId: string): Promise<string> {
+  return sign(
+    { purpose: "link", sub: userId, exp: Math.floor(Date.now() / 1000) + LINK_TOKEN_MINUTES * 60 },
+    env.JWT_SECRET,
+  );
+}
+
+async function verifyLinkToken(env: { JWT_SECRET: string }, token: string): Promise<string | null> {
+  try {
+    const payload = await verify(token, env.JWT_SECRET, "HS256");
+    if (payload.purpose !== "link" || typeof payload.sub !== "string") return null;
+    return payload.sub;
+  } catch {
+    return null;
+  }
+}
+
+/** 連携対象ユーザーの解決: Web はセッションクッキー、ネイティブは ?lt= (連携トークン) */
+async function resolveLinkUser(c: Context<AppEnv>): Promise<string | null> {
+  const lt = c.req.query("lt");
+  if (lt) return verifyLinkToken(c.env, lt);
+  return getSessionUserId(c);
+}
+
+/**
+ * プロバイダの sub を既存ユーザーに紐づける。
+ * その sub で既に**別の**ユーザーが存在する場合は失敗 (アカウント統合はしない)。
+ */
+async function linkProvider(
+  db: ReturnType<typeof drizzle>,
+  userId: string,
+  provider: "google" | "apple",
+  sub: string,
+): Promise<boolean> {
+  const subColumn = provider === "google" ? users.googleSub : users.appleSub;
+  const owner = await db.select().from(users).where(eq(subColumn, sub)).get();
+  if (owner) return owner.id === userId;
+  await db
+    .update(users)
+    .set(provider === "google" ? { googleSub: sub } : { appleSub: sub })
+    .where(eq(users.id, userId));
+  return true;
+}
+
+/** 連携完了の共通処理。設定画面 (Web) またはアプリ (ネイティブ) へ結果を返す */
+function finishLink(c: Context<AppEnv>, provider: "google" | "apple", ok: boolean, native: boolean) {
+  if (native) {
+    return c.redirect(`${c.env.APP_SCHEME}://auth#${ok ? `linked=${provider}` : "error=link_conflict"}`);
+  }
+  return c.redirect(ok ? `/settings?linked=${provider}` : "/settings?error=link_conflict");
+}
+
 /** リクエストから JWT を取り出して検証し、ユーザー ID を返す (DB は見ない) */
 export async function getSessionUserId(c: Context<AppEnv>): Promise<string | null> {
   const authHeader = c.req.header("Authorization");
@@ -154,6 +215,22 @@ authApp.get("/google/native", (c) => {
   return c.redirect("/api/auth/google");
 });
 
+// アカウント連携の入口。連携対象ユーザーをクッキーに載せて通常フローへ流す
+// (Google のコールバックはトップレベル GET なので SameSite=Lax クッキーが届く)
+authApp.get("/google/link", async (c) => {
+  const userId = await resolveLinkUser(c);
+  if (!userId) return c.redirect("/settings?error=link");
+  setCookie(c, LINK_COOKIE, await issueLinkToken(c.env, userId), {
+    path: "/api/auth",
+    httpOnly: true,
+    maxAge: LINK_TOKEN_MINUTES * 60,
+  });
+  if (c.req.query("native") === "1") {
+    setCookie(c, NATIVE_FLOW_COOKIE, "1", { path: "/api/auth", httpOnly: true, maxAge: 600 });
+  }
+  return c.redirect("/api/auth/google");
+});
+
 authApp.use("/google", async (c, next) => {
   if (!c.env.GOOGLE_CLIENT_ID || !c.env.GOOGLE_CLIENT_SECRET) {
     return c.text("Google OAuth が未設定です (GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET)", 500);
@@ -170,6 +247,19 @@ authApp.get("/google", async (c) => {
   if (!profile?.email || !profile.id) return c.redirect("/?error=google");
 
   const db = drizzle(c.env.DB);
+  const native = !!getCookie(c, NATIVE_FLOW_COOKIE);
+  if (native) deleteCookie(c, NATIVE_FLOW_COOKIE, { path: "/api/auth" });
+
+  // 連携モード: ログインではなく、現在のユーザーに googleSub を紐づける
+  const linkCookie = getCookie(c, LINK_COOKIE);
+  if (linkCookie) {
+    deleteCookie(c, LINK_COOKIE, { path: "/api/auth" });
+    const linkUserId = await verifyLinkToken(c.env, linkCookie);
+    if (!linkUserId) return finishLink(c, "google", false, native);
+    const ok = await linkProvider(db, linkUserId, "google", profile.id);
+    return finishLink(c, "google", ok, native);
+  }
+
   const token = await loginWithProfile(db, c.env, {
     provider: "google",
     sub: profile.id,
@@ -177,29 +267,38 @@ authApp.get("/google", async (c) => {
     name: profile.name ?? profile.email,
     avatarUrl: profile.picture,
   });
-
-  const native = !!getCookie(c, NATIVE_FLOW_COOKIE);
-  if (native) deleteCookie(c, NATIVE_FLOW_COOKIE, { path: "/api/auth" });
   return finishLogin(c, token, native);
 });
 
 // ───────────────────────── Apple ─────────────────────────
 // Apple は scope 要求時のコールバックがクロスサイトの form POST になるため、
-// SameSite=Lax のクッキーが届かない。ネイティブフラグと CSRF 対策は
+// SameSite=Lax のクッキーが届かない。ネイティブフラグ・連携対象ユーザー・CSRF 対策は
 // state (短命 JWT) に載せて往復させる。
-async function startApple(c: Context<AppEnv>, native: boolean) {
+async function startApple(c: Context<AppEnv>, opts: { native: boolean; linkUserId?: string }) {
   const config = appleConfig(c.env);
   if (!config) return c.text("Apple ログインが未設定です (APPLE_* シークレット)", 500);
   const state = await sign(
-    { purpose: "apple_state", native, exp: Math.floor(Date.now() / 1000) + 600 },
+    {
+      purpose: "apple_state",
+      native: opts.native,
+      linkUserId: opts.linkUserId,
+      exp: Math.floor(Date.now() / 1000) + 600,
+    },
     c.env.JWT_SECRET,
   );
   const redirectUri = new URL("/api/auth/apple/callback", c.req.url).toString();
   return c.redirect(buildAppleAuthUrl(config, redirectUri, state));
 }
 
-authApp.get("/apple", (c) => startApple(c, false));
-authApp.get("/apple/native", (c) => startApple(c, true));
+authApp.get("/apple", (c) => startApple(c, { native: false }));
+authApp.get("/apple/native", (c) => startApple(c, { native: true }));
+
+// アカウント連携の入口 (Apple)
+authApp.get("/apple/link", async (c) => {
+  const userId = await resolveLinkUser(c);
+  if (!userId) return c.redirect("/settings?error=link");
+  return startApple(c, { native: c.req.query("native") === "1", linkUserId: userId });
+});
 
 authApp.post("/apple/callback", async (c) => {
   const config = appleConfig(c.env);
@@ -211,10 +310,12 @@ authApp.post("/apple/callback", async (c) => {
   if (typeof form.error === "string" || !code || !state) return c.redirect("/?error=apple");
 
   let native = false;
+  let linkUserId: string | undefined;
   try {
     const payload = await verify(state, c.env.JWT_SECRET, "HS256");
     if (payload.purpose !== "apple_state") throw new Error("state 不一致");
     native = payload.native === true;
+    linkUserId = typeof payload.linkUserId === "string" ? payload.linkUserId : undefined;
   } catch {
     return c.redirect("/?error=apple");
   }
@@ -222,8 +323,15 @@ authApp.post("/apple/callback", async (c) => {
   try {
     const redirectUri = new URL("/api/auth/apple/callback", c.req.url).toString();
     const profile = await exchangeAppleCode(config, code, redirectUri);
-    const name = parseAppleUserField(typeof form.user === "string" ? form.user : undefined);
     const db = drizzle(c.env.DB);
+
+    // 連携モード: ログインではなく、現在のユーザーに appleSub を紐づける
+    if (linkUserId) {
+      const ok = await linkProvider(db, linkUserId, "apple", profile.sub);
+      return finishLink(c, "apple", ok, native);
+    }
+
+    const name = parseAppleUserField(typeof form.user === "string" ? form.user : undefined);
     const token = await loginWithProfile(db, c.env, {
       provider: "apple",
       sub: profile.sub,
@@ -276,7 +384,13 @@ export const authMiddleware = createMiddleware<AppEnv>(async (c, next) => {
     await db.update(users).set({ lastSeenAt: new Date().toISOString() }).where(eq(users.id, userId));
   }
 
-  const user: AuthUser = { id: row.id, email: row.email, name: row.name };
+  const user: AuthUser = {
+    id: row.id,
+    email: row.email,
+    name: row.name,
+    linkedGoogle: !!row.googleSub,
+    linkedApple: !!row.appleSub,
+  };
   c.set("user", user);
   c.set("db", db);
   await next();

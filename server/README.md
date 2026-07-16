@@ -47,6 +47,7 @@ npm run db:migrate:remote # 本番 D1 へ適用 (通常は CI に任せる)
 | GET /api/auth/providers | 設定済みログイン方法 (認証不要) |
 | GET /api/auth/google, /google/native | Google ログイン (native はトークンをスキームで返す) |
 | GET /api/auth/apple, /apple/native, POST /apple/callback | Apple ログイン |
+| GET /api/auth/google/link, /apple/link, POST /api/auth/link-token | アカウント連携 (ログイン中ユーザーに別プロバイダを紐づけ。メール不一致でも可) |
 | GET /api/auth/dev | 開発用ログイン (DEV_AUTH=true のみ。?native=1 で JSON) |
 | POST /api/auth/logout | クッキー削除 |
 | GET /api/me | ログイン中ユーザー |
