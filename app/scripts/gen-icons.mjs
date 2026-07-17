@@ -17,7 +17,10 @@ import { fileURLToPath } from "node:url";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const IMAGES = join(ROOT, "assets", "images");
+// public/ は expo export で dist ルートへそのままコピーされる (apple-touch-icon 用)
+const PUBLIC = join(ROOT, "public");
 mkdirSync(IMAGES, { recursive: true });
+mkdirSync(PUBLIC, { recursive: true });
 
 // ---- 最小PNGエンコーダ ----
 const CRC_TABLE = Array.from({ length: 256 }, (_, n) => {
@@ -190,3 +193,8 @@ for (const [name, png] of targets) {
   writeFileSync(join(IMAGES, name), png);
   console.log(`✓ assets/images/${name}`);
 }
+
+// iOS の「ホーム画面に追加」用 (+html.tsx で <link rel="apple-touch-icon"> を張る)。
+// iOS 側で角丸マスクがかかるため、角丸なし・不透明の正方形で出す
+writeFileSync(join(PUBLIC, "apple-touch-icon.png"), drawIcon(180));
+console.log("✓ public/apple-touch-icon.png");

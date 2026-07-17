@@ -9,7 +9,7 @@
     "web:mock": "EXPO_PUBLIC_ENABLE_MOCK=1 expo start --web",
     "typecheck": "tsc --noEmit",
     "icons": "node scripts/gen-icons.mjs",
-    "build:web": "expo export -p web",
+    "build:web": "expo export -p web && node scripts/postbuild-web.mjs",
     "device:ios": "expo run:ios --device",
     "device:android": "expo run:android --device",
     "android:metro-host": "bash scripts/android-metro-host.sh"
